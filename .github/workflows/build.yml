@@ -47,3 +47,4 @@ jobs:
       image-target: ${{ matrix.image_target }}
       platform: ${{ matrix.platform }}
       default-tag: latest
+    secrets: inherit
