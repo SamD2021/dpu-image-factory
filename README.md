@@ -82,7 +82,6 @@ This repo already includes `Justfile` fixes for non-POSIX filesystems (for examp
 ## CI Behavior
 
 - Builds both role images for `amd64` and `arm64`
-- Runs required-binary checks (`verify-packages.sh`)
 - Pushes images to GHCR on default branch
 - Signs pushed images via Cosign (`SIGNING_SECRET`)
 

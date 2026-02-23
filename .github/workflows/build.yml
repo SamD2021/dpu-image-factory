@@ -21,6 +21,10 @@ concurrency:
 jobs:
   build-images:
     name: ${{ matrix.image_name }} (${{ matrix.platform }})
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
