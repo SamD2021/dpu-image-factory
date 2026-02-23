@@ -132,7 +132,10 @@ jobs:
           COSIGN_EXPERIMENTAL: false
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
         run: |
-          IMAGE_FULL="${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}"
+          if [[ -z "${COSIGN_PRIVATE_KEY}" ]]; then
+            echo "SIGNING_SECRET is not set; skipping cosign signing."
+            exit 0
+          fi
           for tag in ${{ steps.metadata.outputs.tags }}; do
-            cosign sign -y --key env://COSIGN_PRIVATE_KEY "${IMAGE_FULL}:${tag}"
+            cosign sign -y --key env://COSIGN_PRIVATE_KEY "$tag"
           done
