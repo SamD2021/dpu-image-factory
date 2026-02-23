@@ -1,4 +1,4 @@
-export image_name := env("IMAGE_NAME", "image-template") # output image name, usually same as repo name, change as needed
+export image_name := env("IMAGE_NAME", "image-template")
 export default_tag := env("DEFAULT_TAG", "latest")
 export bib_image := env("BIB_IMAGE", "quay.io/centos-bootc/bootc-image-builder:latest")
 
@@ -43,6 +43,20 @@ clean:
     rm -f changelog.md
     rm -f output.env
     rm -f output/
+
+[group('Utility')]
+verify role="control-plane" tag="dev":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    image=""
+    case "{{ role }}" in
+      control-plane) image="localhost/dpu-sim-control-plane:{{ tag }}" ;;
+      worker) image="localhost/dpu-sim-worker:{{ tag }}" ;;
+      *) echo "role must be one of: control-plane, worker" >&2; exit 1 ;;
+    esac
+
+    ./build_files/verify-packages.sh "${image}"
 
 # Sudo Clean Repo
 [group('Utility')]
@@ -133,11 +147,11 @@ _rootful_load_image $target_image=image_name $tag=default_tag:
     return_code=$?
     set -e
 
-    USER_IMG_ID=$(podman images --filter reference="${target_image}:${tag}" --format "'{{ '{{.ID}}' }}'")
+    USER_IMG_ID=$(podman images --filter reference="${target_image}:${tag}" --quiet | head -n1)
 
     if [[ $return_code -eq 0 ]]; then
         # If the image is found, load it into rootful podman
-        ID=$(just sudoif podman images --filter reference="${target_image}:${tag}" --format "'{{ '{{.ID}}' }}'")
+        ID=$(just sudoif podman images --filter reference="${target_image}:${tag}" --quiet | head -n1)
         if [[ "$ID" != "$USER_IMG_ID" ]]; then
             # If the image ID is not found or different from user, copy the image from user podman to root podman
             COPYTMP=$(mktemp -p "${PWD}" -d -t _build_podman_scp.XXXXXXXXXX)
@@ -182,10 +196,21 @@ _build-bib $target_image $tag $type $config: (_rootful_load_image target_image t
       ${args} \
       "${target_image}:${tag}"
 
-    mkdir -p output
-    sudo mv -f $BUILDTMP/* output/
-    sudo rmdir $BUILDTMP
-    sudo chown -R $USER:$USER output/
+    output_dir="output"
+    if [[ -L output ]]; then
+        output_dir="$(readlink -f output || true)"
+        if [[ -z "${output_dir}" || ! -d "${output_dir}" ]]; then
+            echo "output symlink is broken or target is unavailable: $(readlink output)" >&2
+            exit 1
+        fi
+    elif [[ ! -d output ]]; then
+        mkdir -p output
+    fi
+    # Use copy + cleanup instead of mv so non-POSIX filesystems (e.g. vfat/exfat)
+    # can still receive artifacts without ownership-preservation failures.
+    sudo cp -r --no-preserve=ownership "$BUILDTMP"/. "$output_dir"/
+    sudo rm -rf $BUILDTMP
+    sudo chown -R $USER:$USER "$output_dir"/ 2>/dev/null || true
 
 # Podman builds the image from the Containerfile and creates a bootable image
 # Parameters:
@@ -252,7 +277,7 @@ _run-vm $target_image $tag $type $config:
     run_args+=(--publish "127.0.0.1:${port}:8006")
     run_args+=(--env "CPU_CORES=4")
     run_args+=(--env "RAM_SIZE=8G")
-    run_args+=(--env "DISK_SIZE=64G")
+    run_args+=(--env "DISK_SIZE=20G")
     run_args+=(--env "TPM=Y")
     run_args+=(--env "GPU=Y")
     run_args+=(--device=/dev/kvm)
@@ -277,22 +302,64 @@ run-vm-iso $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-
 
 # Run a virtual machine using systemd-vmspawn
 [group('Run Virtal Machine')]
-spawn-vm rebuild="0" type="qcow2" ram="6G":
+spawn-vm rebuild="0" type="qcow2" ram="6G" console="interactive":
     #!/usr/bin/env bash
 
     set -euo pipefail
 
     [ "{{ rebuild }}" -eq 1 ] && echo "Rebuilding the ISO" && just build-vm {{ rebuild }} {{ type }}
 
+    image_file="$(find -L ./output -type f -name "disk.{{ type }}" | head -n1)"
+    if [[ -z "${image_file}" ]]; then
+        echo "No VM image found for type '{{ type }}' under ./output" >&2
+        exit 1
+    fi
+
+    cleanup_image=""
+    if [[ "{{ type }}" == "qcow2" ]]; then
+        # vmspawn currently wires this image as raw in QEMU; convert qcow2 first.
+        cleanup_image="$(mktemp -p /tmp -t vmspawn-disk.XXXXXX.raw)"
+        qemu-img convert -O raw "${image_file}" "${cleanup_image}"
+        image_file="${cleanup_image}"
+    fi
+
+    fw_args=()
+    host_arch="$(uname -m)"
+    if [[ "${host_arch}" == "aarch64" || "${host_arch}" == "arm64" ]]; then
+        # On ARM hosts, force AArch64 UEFI firmware selection to avoid "no bootable option" fallbacks.
+        fw_candidates=(
+            /usr/share/qemu/firmware/51-edk2-aarch64-raw.json
+            /usr/share/qemu/firmware/50-edk2-aarch64-qcow2.json
+            /usr/share/qemu/firmware/53-edk2-aarch64-verbose-raw.json
+            /usr/share/qemu/firmware/52-edk2-aarch64-verbose-qcow2.json
+        )
+        fw_json=""
+        for cand in "${fw_candidates[@]}"; do
+            if [[ -f "${cand}" ]]; then
+                fw_json="${cand}"
+                break
+            fi
+        done
+        if [[ -z "${fw_json}" ]]; then
+            echo "No AArch64 firmware JSON found under /usr/share/qemu/firmware." >&2
+            exit 1
+        fi
+        fw_args+=(--secure-boot=no --firmware="${fw_json}")
+    fi
+
     systemd-vmspawn \
       -M "bootc-image" \
-      --console=gui \
+      --console={{ console }} \
       --cpus=2 \
       --ram=$(echo {{ ram }}| /usr/bin/numfmt --from=iec) \
       --network-user-mode \
       --vsock=false --pass-ssh-key=false \
-      -i ./output/**/*.{{ type }}
+      "${fw_args[@]}" \
+      -i "${image_file}"
 
+    if [[ -n "${cleanup_image}" ]]; then
+        rm -f "${cleanup_image}"
+    fi
 
 # Runs shell check on all Bash scripts
 lint:
