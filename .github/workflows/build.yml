@@ -49,6 +49,55 @@ jobs:
       default-tag: latest
     secrets: inherit
 
+  merge-container-manifests:
+    name: Merge multi-arch manifests
+    needs: build-images
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: none
+    env:
+      IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+      DEFAULT_TAG: latest
+    steps:
+      - name: Prepare environment
+        run: |
+          echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> "${GITHUB_ENV}"
+
+      - name: Install buildah
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y buildah
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | buildah login -u "${{ github.actor }}" --password-stdin ghcr.io
+
+      - name: Publish multi-arch tags
+        run: |
+          set -euo pipefail
+          date_tag="$(date -u +%Y%m%d)"
+          images=(dpu-sim-control-plane dpu-sim-worker)
+          tag_bases=("${DEFAULT_TAG}" "${DEFAULT_TAG}.${date_tag}" "${date_tag}")
+
+          for image in "${images[@]}"; do
+            repo="${IMAGE_REGISTRY}/${image}"
+            for base in "${tag_bases[@]}"; do
+              manifest_ref="${repo}:${base}"
+              amd_ref="docker://${repo}:${base}-amd64"
+              arm_ref="docker://${repo}:${base}-arm64"
+
+              buildah manifest rm "${manifest_ref}" >/dev/null 2>&1 || true
+              buildah manifest create "${manifest_ref}"
+              buildah manifest add --arch amd64 "${manifest_ref}" "${amd_ref}"
+              buildah manifest add --arch arm64 "${manifest_ref}" "${arm_ref}"
+              buildah manifest push --all "${manifest_ref}" "docker://${manifest_ref}"
+              buildah manifest rm "${manifest_ref}" >/dev/null 2>&1 || true
+            done
+          done
+
   build-qcow2:
     name: Build and publish qcow2 (${{ matrix.image_name }} / ${{ matrix.platform }})
     needs: build-images
@@ -90,7 +139,7 @@ jobs:
         with:
           builder-image: quay.io/centos-bootc/bootc-image-builder:latest
           config-file: ./disk_config/disk.toml
-          image: ${{ env.IMAGE_REGISTRY }}/${{ matrix.image_name }}:${{ env.DEFAULT_TAG }}
+          image: ${{ env.IMAGE_REGISTRY }}/${{ matrix.image_name }}:${{ env.DEFAULT_TAG }}-${{ matrix.platform }}
           types: qcow2
           additional-args: --use-librepo=True --rootfs=btrfs
 

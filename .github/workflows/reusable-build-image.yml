@@ -63,9 +63,9 @@ jobs:
         with:
           images: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ env.DEFAULT_TAG }}
-            type=raw,value=${{ env.DEFAULT_TAG }}.{{date 'YYYYMMDD'}}
-            type=raw,value={{date 'YYYYMMDD'}}
+            type=raw,value=${{ env.DEFAULT_TAG }}-${{ inputs.platform }},enable=${{ github.event_name != 'pull_request' }}
+            type=raw,value=${{ env.DEFAULT_TAG }}.{{date 'YYYYMMDD'}}-${{ inputs.platform }},enable=${{ github.event_name != 'pull_request' }}
+            type=raw,value={{date 'YYYYMMDD'}}-${{ inputs.platform }},enable=${{ github.event_name != 'pull_request' }}
             type=sha,enable=${{ github.event_name == 'pull_request' }}
             type=ref,event=pr
           labels: |
