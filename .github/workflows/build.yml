@@ -52,7 +52,6 @@ jobs:
   build-qcow2:
     name: Build and publish qcow2 (${{ matrix.image_name }} / ${{ matrix.platform }})
     needs: build-images
-    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
@@ -93,7 +92,7 @@ jobs:
           config-file: ./disk_config/disk.toml
           image: ${{ env.IMAGE_REGISTRY }}/${{ matrix.image_name }}:${{ env.DEFAULT_TAG }}
           types: qcow2
-          additional-args: --use-librepo=True
+          additional-args: --use-librepo=True --rootfs=btrfs
 
       - name: Locate qcow2 output
         id: qcow2
@@ -112,6 +111,7 @@ jobs:
           name: ${{ matrix.image_name }}-qcow2-${{ matrix.platform }}
           path: ${{ steps.qcow2.outputs.path }}
           if-no-files-found: error
+          retention-days: 3
           compression-level: 0
           overwrite: true
 
@@ -136,3 +136,73 @@ jobs:
             "${{ steps.qcow2.outputs.path }}:application/x-qemu-disk"
           oras copy "${ref_base}:${{ env.DEFAULT_TAG }}-${{ matrix.platform }}" "${ref_base}:${date_tag}-${{ matrix.platform }}"
           oras copy "${ref_base}:${{ env.DEFAULT_TAG }}-${{ matrix.platform }}" "${ref_base}:sha-${sha_tag}-${{ matrix.platform }}"
+
+  cleanup-qcow2-tags:
+    name: Cleanup old qcow2 tags (${{ matrix.package_name }})
+    needs: build-qcow2
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        package_name:
+          - dpu-sim-control-plane-qcow2
+          - dpu-sim-worker-qcow2
+    permissions:
+      contents: read
+      packages: write
+      id-token: none
+    env:
+      KEEP_COUNT: "14"
+    steps:
+      - name: Prune old date/sha qcow2 tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          OWNER_TYPE: ${{ github.event.repository.owner.type }}
+          PACKAGE_NAME: ${{ matrix.package_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${OWNER_TYPE}" == "Organization" ]]; then
+            api_base="/orgs/${OWNER}/packages/container/${PACKAGE_NAME}"
+          else
+            api_base="/users/${OWNER}/packages/container/${PACKAGE_NAME}"
+          fi
+
+          tmp_json="$(mktemp)"
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            "${api_base}/versions?per_page=100" > "${tmp_json}"
+
+          mapfile -t delete_ids < <(
+            jq -r --argjson keep "${KEEP_COUNT}" '
+              [
+                .[]
+                | {
+                    id,
+                    created_at,
+                    tags: (.metadata.container.tags // [])
+                  }
+                | select((.tags | any(test("^latest-(amd64|arm64)$"))) | not)
+                | select(.tags | any(test("^(sha-[0-9a-f]{12}-(amd64|arm64)|[0-9]{8}-(amd64|arm64))$")))
+              ]
+              | sort_by(.created_at)
+              | reverse
+              | .[$keep:]
+              | .[].id
+            ' "${tmp_json}"
+          )
+
+          if [[ "${#delete_ids[@]}" -eq 0 ]]; then
+            echo "No old qcow2 versions to delete for ${PACKAGE_NAME}."
+            exit 0
+          fi
+
+          for id in "${delete_ids[@]}"; do
+            echo "Deleting ${PACKAGE_NAME} version id: ${id}"
+            gh api \
+              -X DELETE \
+              -H "Accept: application/vnd.github+json" \
+              "${api_base}/versions/${id}"
+          done
