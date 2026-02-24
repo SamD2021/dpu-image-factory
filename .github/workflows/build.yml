@@ -48,3 +48,91 @@ jobs:
       platform: ${{ matrix.platform }}
       default-tag: latest
     secrets: inherit
+
+  build-qcow2:
+    name: Build and publish qcow2 (${{ matrix.image_name }} / ${{ matrix.platform }})
+    needs: build-images
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image_name: dpu-sim-control-plane
+            image_target: dpu-sim-control-plane
+            platform: amd64
+          - image_name: dpu-sim-control-plane
+            image_target: dpu-sim-control-plane
+            platform: arm64
+          - image_name: dpu-sim-worker
+            image_target: dpu-sim-worker
+            platform: amd64
+          - image_name: dpu-sim-worker
+            image_target: dpu-sim-worker
+            platform: arm64
+    permissions:
+      contents: read
+      packages: write
+      id-token: none
+    env:
+      IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+      DEFAULT_TAG: latest
+    steps:
+      - name: Prepare environment
+        run: |
+          echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> "${GITHUB_ENV}"
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Build qcow2 image
+        id: bib
+        uses: osbuild/bootc-image-builder-action@main
+        with:
+          builder-image: quay.io/centos-bootc/bootc-image-builder:latest
+          config-file: ./disk_config/disk.toml
+          image: ${{ env.IMAGE_REGISTRY }}/${{ matrix.image_name }}:${{ env.DEFAULT_TAG }}
+          types: qcow2
+          additional-args: --use-librepo=True
+
+      - name: Locate qcow2 output
+        id: qcow2
+        run: |
+          set -euo pipefail
+          qcow2_path="$(find "${{ steps.bib.outputs.output-directory }}" -type f -name '*.qcow2' | head -n1)"
+          if [[ -z "${qcow2_path}" ]]; then
+            echo "qcow2 output not found" >&2
+            exit 1
+          fi
+          echo "path=${qcow2_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload qcow2 as workflow artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ${{ matrix.image_name }}-qcow2-${{ matrix.platform }}
+          path: ${{ steps.qcow2.outputs.path }}
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+
+      - name: Setup ORAS
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Push qcow2 artifact to GHCR
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        run: |
+          set -euo pipefail
+          ref_base="${{ env.IMAGE_REGISTRY }}/${{ matrix.image_name }}-qcow2"
+          date_tag="$(date -u +%Y%m%d)"
+          sha_tag="${GITHUB_SHA::12}"
+          oras push \
+            "${ref_base}:${{ env.DEFAULT_TAG }}-${{ matrix.platform }}" \
+            --artifact-type application/vnd.dpu-sim.qcow2.v1 \
+            "${{ steps.qcow2.outputs.path }}:application/x-qemu-disk"
+          oras copy "${ref_base}:${{ env.DEFAULT_TAG }}-${{ matrix.platform }}" "${ref_base}:${date_tag}-${{ matrix.platform }}"
+          oras copy "${ref_base}:${{ env.DEFAULT_TAG }}-${{ matrix.platform }}" "${ref_base}:sha-${sha_tag}-${{ matrix.platform }}"

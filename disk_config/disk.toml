@@ -1,6 +1,6 @@
 [[customizations.filesystem]]
 mountpoint = "/"
-minsize = "12 GiB"
+minsize = "20 GiB"
 
 [[customizations.user]]
 name = "dpu-sim"

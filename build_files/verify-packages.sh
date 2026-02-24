@@ -12,6 +12,7 @@ required_bins=(
   kubeadm
   kubelet
   kubectl
+  cloud-init
   crio
   ovs-vsctl
   nmcli

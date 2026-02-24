@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=quay.io/fedora/fedora-bootc:42
+ARG BASE_IMAGE=quay.io/fedora/fedora-bootc:43
 
 FROM scratch AS ctx
 COPY build_files /ctx
