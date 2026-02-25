@@ -6,6 +6,7 @@ dnf5 install -y --setopt=install_weak_deps=False \
   kubeadm \
   kubectl \
   cloud-init \
+  openssh-server \
   cri-o \
   iproute-tc \
   containernetworking-plugins \
@@ -27,6 +28,34 @@ for plugin in /usr/libexec/cni/*; do
   ln -sf "${plugin}" /opt/cni/bin/
 done
 shopt -u nullglob
+
+# Force NoCloud datasource so dpu-sim's cidata ISO is always consumed.
+mkdir -p /etc/cloud/cloud.cfg.d
+cat >/etc/cloud/cloud.cfg.d/90-datasource.cfg <<'EOF'
+datasource_list: [ NoCloud, None ]
+EOF
+
+# Match dpu-sim cloud-init user-data behavior for root/password SSH access.
+cat >/etc/cloud/cloud.cfg.d/91-dpu-sim-auth.cfg <<'EOF'
+disable_root: false
+ssh_pwauth: true
+EOF
+
+# Ensure first boot gets DHCP on any attached Ethernet NIC.
+mkdir -p /etc/NetworkManager/system-connections
+cat >/etc/NetworkManager/system-connections/default-dhcp.nmconnection <<'EOF'
+[connection]
+id=default-dhcp
+type=ethernet
+autoconnect=true
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=ignore
+EOF
+chmod 0600 /etc/NetworkManager/system-connections/default-dhcp.nmconnection
 
 # Kubernetes node prerequisites.
 cat >/etc/modules-load.d/k8s.conf <<'EOF'
@@ -84,4 +113,6 @@ systemctl enable crio
 systemctl enable kubelet
 systemctl enable dpu-disable-swap.service
 systemctl enable NetworkManager
+systemctl enable sshd
+systemctl enable cloud-init.target cloud-init-local.service cloud-init-main.service cloud-config.service cloud-final.service
 systemctl enable openvswitch
