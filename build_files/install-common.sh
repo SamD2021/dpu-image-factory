@@ -41,22 +41,6 @@ disable_root: false
 ssh_pwauth: true
 EOF
 
-# Ensure first boot gets DHCP on any attached Ethernet NIC.
-mkdir -p /etc/NetworkManager/system-connections
-cat >/etc/NetworkManager/system-connections/default-dhcp.nmconnection <<'EOF'
-[connection]
-id=default-dhcp
-type=ethernet
-autoconnect=true
-
-[ipv4]
-method=auto
-
-[ipv6]
-method=ignore
-EOF
-chmod 0600 /etc/NetworkManager/system-connections/default-dhcp.nmconnection
-
 # Kubernetes node prerequisites.
 cat >/etc/modules-load.d/k8s.conf <<'EOF'
 overlay
