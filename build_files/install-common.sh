@@ -21,6 +21,8 @@ dnf5 install -y --setopt=install_weak_deps=False \
   wget \
   tmux
 
+# Fixes FailedMount ... read-only file system on flexvolume-dir for kube-controller-manager
+mkdir -p /usr/libexec/kubernetes/kubelet-plugins/volume/exec
 # Match dpu-sim expectations: CRI-O on Fedora looks under /opt/cni/bin.
 mkdir -p /opt/cni/bin
 shopt -s nullglob
