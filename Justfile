@@ -114,6 +114,24 @@ build $target_image=image_name $tag=default_tag:
         --tag "${target_image}:${tag}" \
         .
 
+[group('Build IPU Image')]
+build-ipu-image $tag=default_tag:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    podman build \
+        --pull=newer \
+        --target dpu-ipu-upstream \
+        --tag "localhost/dpu-ipu-upstream:{{ tag }}" \
+        .
+
+[group('Build IPU Image')]
+verify-ipu $tag=default_tag:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    ./build_files/verify-packages.sh "localhost/dpu-ipu-upstream:{{ tag }}"
+
 # Command: _rootful_load_image
 # Description: This script checks if the current user is root or running under sudo. If not, it attempts to resolve the image tag using podman inspect.
 #              If the image is found, it loads it into rootful podman. If the image is not found, it pulls it from the repository.
@@ -234,6 +252,9 @@ build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build
 [group('Build Virtal Machine Image')]
 build-iso $target_image=("localhost/" + image_name) $tag=default_tag: && (_build-bib target_image tag "iso" "disk_config/iso.toml")
 
+[group('Build IPU Image')]
+build-ipu-iso $target_image="localhost/dpu-ipu-upstream" $tag=default_tag: && (_build-bib target_image tag "anaconda-iso" "disk_config/iso-ipu.toml")
+
 # Rebuild a QCOW2 virtual machine image
 [group('Build Virtal Machine Image')]
 rebuild-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_rebuild-bib target_image tag "qcow2" "disk_config/disk.toml")
@@ -245,6 +266,9 @@ rebuild-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_reb
 # Rebuild an ISO virtual machine image
 [group('Build Virtal Machine Image')]
 rebuild-iso $target_image=("localhost/" + image_name) $tag=default_tag: && (_rebuild-bib target_image tag "iso" "disk_config/iso.toml")
+
+[group('Build IPU Image')]
+rebuild-ipu-iso $target_image="localhost/dpu-ipu-upstream" $tag=default_tag: && (_rebuild-bib target_image tag "anaconda-iso" "disk_config/iso-ipu.toml")
 
 # Run a virtual machine with the specified image type and configuration
 _run-vm $target_image $tag $type $config:
