@@ -2,3 +2,7 @@ cosign.key
 _build_*
 output
 _build-*/**
+_build-bib.*/
+_build-bib.*/**
+_build_podman_scp.*/
+_build_podman_scp.*/**

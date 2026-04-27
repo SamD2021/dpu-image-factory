@@ -1,0 +1,13 @@
+[customizations.installer.kickstart]
+contents = """
+text
+eula --agreed
+skipx
+zerombr
+clearpart --all --initlabel
+autopart --type=lvm --noswap
+network --bootproto=dhcp --device=enp0s1f0d1
+bootloader --location=mbr --driveorder=sda --append=\"ip=192.168.0.2:::255.255.255.0::enp0s1f0:off netroot=iscsi:192.168.0.1::::iqn.e2000:acc acpi=force\"
+ostreecontainer --url=/run/install/repo/container --transport=oci --no-signature-verification
+reboot
+"""

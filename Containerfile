@@ -24,3 +24,11 @@ RUN --mount=type=cache,dst=/var/cache/dnf \
     /ctx/install-worker.sh && \
     /ctx/cleanup.sh
 RUN bootc container lint
+
+FROM dpu-sim-base AS dpu-ipu-upstream
+RUN --mount=type=cache,dst=/var/cache/dnf \
+    --mount=type=cache,dst=/var/cache \
+    --mount=type=bind,from=ctx,src=/ctx,dst=/ctx \
+    /ctx/install-ipu-upstream.sh && \
+    /ctx/cleanup.sh
+RUN bootc container lint
