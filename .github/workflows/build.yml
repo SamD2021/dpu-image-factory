@@ -41,6 +41,12 @@ jobs:
           - image_name: dpu-sim-worker
             image_target: dpu-sim-worker
             platform: arm64
+          - image_name: fedora-k8s-ipu
+            image_target: dpu-ipu-upstream
+            platform: amd64
+          - image_name: fedora-k8s-ipu
+            image_target: dpu-ipu-upstream
+            platform: arm64
     uses: ./.github/workflows/reusable-build-image.yml
     with:
       image-name: ${{ matrix.image_name }}
@@ -79,7 +85,7 @@ jobs:
         run: |
           set -euo pipefail
           date_tag="$(date -u +%Y%m%d)"
-          images=(dpu-sim-control-plane dpu-sim-worker)
+          images=(dpu-sim-control-plane dpu-sim-worker fedora-k8s-ipu)
           tag_bases=("${DEFAULT_TAG}" "${DEFAULT_TAG}.${date_tag}" "${date_tag}")
 
           for image in "${images[@]}"; do
